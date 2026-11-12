@@ -24,6 +24,18 @@ locals {
   }
 }
 
+# Safety guard: evaluates even with 0 rule for_each instances (a precondition on
+# cato_wnw_rule itself would never run against an empty set), catching a truncated
+# or wrong-tenant export before it wipes out the live policy.
+resource "terraform_data" "guard_empty_policy" {
+  lifecycle {
+    precondition {
+      condition     = var.allow_empty_policy || length(local.wnw_rules_data) > 0
+      error_message = "Policy JSON contains 0 rules. If intentional (greenfield/teardown), set allow_empty_policy = true. A truncated or wrong-tenant export would otherwise destroy the entire live policy."
+    }
+  }
+}
+
 resource "cato_wnw_section" "sections" {
   for_each = local.sections_data
   at = {
@@ -63,12 +75,12 @@ resource "cato_wnw_rule" "rules" {
     try(each.value.rule.source, null) != null ? {
       source = {
         for k, v in {
-          ip                = try(length(each.value.rule.source.ip), 0) > 0 ? each.value.rule.source.ip : null
-          host              = try(length(each.value.rule.source.host), 0) > 0 ? [for host in each.value.rule.source.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
-          site              = try(length(each.value.rule.source.site), 0) > 0 ? [for site in each.value.rule.source.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
-          users_group       = try(length(each.value.rule.source.usersGroup), 0) > 0 ? [for group in each.value.rule.source.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
-          subnet            = try(length(each.value.rule.source.subnet), 0) > 0 ? each.value.rule.source.subnet : null
-          ip_range          = try(length(each.value.rule.source.ipRange), 0) > 0 ? [for range in each.value.rule.source.ipRange : {
+          ip          = try(length(each.value.rule.source.ip), 0) > 0 ? each.value.rule.source.ip : null
+          host        = try(length(each.value.rule.source.host), 0) > 0 ? [for host in each.value.rule.source.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
+          site        = try(length(each.value.rule.source.site), 0) > 0 ? [for site in each.value.rule.source.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
+          users_group = try(length(each.value.rule.source.usersGroup), 0) > 0 ? [for group in each.value.rule.source.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
+          subnet      = try(length(each.value.rule.source.subnet), 0) > 0 ? each.value.rule.source.subnet : null
+          ip_range = try(length(each.value.rule.source.ipRange), 0) > 0 ? [for range in each.value.rule.source.ipRange : {
             from = range.from
             to   = range.to
           }] : null
@@ -87,12 +99,12 @@ resource "cato_wnw_rule" "rules" {
     try(each.value.rule.destination, null) != null ? {
       destination = {
         for k, v in {
-          ip                  = try(length(each.value.rule.destination.ip), 0) > 0 ? each.value.rule.destination.ip : null
-          host                = try(length(each.value.rule.destination.host), 0) > 0 ? [for host in each.value.rule.destination.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
-          site                = try(length(each.value.rule.destination.site), 0) > 0 ? [for site in each.value.rule.destination.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
-          users_group         = try(length(each.value.rule.destination.usersGroup), 0) > 0 ? [for group in each.value.rule.destination.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
-          subnet              = try(length(each.value.rule.destination.subnet), 0) > 0 ? each.value.rule.destination.subnet : null
-          ip_range            = try(length(each.value.rule.destination.ipRange), 0) > 0 ? [for range in each.value.rule.destination.ipRange : {
+          ip          = try(length(each.value.rule.destination.ip), 0) > 0 ? each.value.rule.destination.ip : null
+          host        = try(length(each.value.rule.destination.host), 0) > 0 ? [for host in each.value.rule.destination.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
+          site        = try(length(each.value.rule.destination.site), 0) > 0 ? [for site in each.value.rule.destination.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
+          users_group = try(length(each.value.rule.destination.usersGroup), 0) > 0 ? [for group in each.value.rule.destination.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
+          subnet      = try(length(each.value.rule.destination.subnet), 0) > 0 ? each.value.rule.destination.subnet : null
+          ip_range = try(length(each.value.rule.destination.ipRange), 0) > 0 ? [for range in each.value.rule.destination.ipRange : {
             from = range.from
             to   = range.to
           }] : null
@@ -178,7 +190,15 @@ resource "cato_wnw_rule" "rules" {
 
         # Allocation IP
         try(length(each.value.rule.configuration.allocationIp), 0) > 0 ? {
-          allocation_ip = [for ip in each.value.rule.configuration.allocationIp : can(ip.name) ? { name = ip.name } : { id = ip.id }]
+          # resolved to THIS tenant's allocation IDs via allocated_ip_id_map when
+          # available (display names embed the tenant-specific Cato-assigned ip, and
+          # AllocatedIp by-NAME refs are unreliable in the API -- by-ID always
+          # resolves). Unmapped refs pass through unchanged (source-tenant plans).
+          allocation_ip = [for ip in each.value.rule.configuration.allocationIp :
+            can(ip.name) && contains(keys(var.allocated_ip_id_map), try(ip.name, "")) ?
+            { id = var.allocated_ip_id_map[ip.name] } :
+            can(ip.name) ? { name = ip.name } : { id = ip.id }
+          ]
         } : {},
 
         # Backhauling Site
@@ -195,9 +215,9 @@ resource "cato_wnw_rule" "rules" {
         try(each.value.rule.configuration.primaryTransport, null) != null ? {
           primary_transport = {
             for k, v in {
-              transport_type            = try(each.value.rule.configuration.primaryTransport.transportType, null)
-              primary_interface_role    = try(each.value.rule.configuration.primaryTransport.primaryInterfaceRole, null)
-              secondary_interface_role  = try(each.value.rule.configuration.primaryTransport.secondaryInterfaceRole, null)
+              transport_type           = try(each.value.rule.configuration.primaryTransport.transportType, null)
+              primary_interface_role   = try(each.value.rule.configuration.primaryTransport.primaryInterfaceRole, null)
+              secondary_interface_role = try(each.value.rule.configuration.primaryTransport.secondaryInterfaceRole, null)
             } : k => v if v != null
           }
         } : {},
@@ -206,9 +226,9 @@ resource "cato_wnw_rule" "rules" {
         try(each.value.rule.configuration.secondaryTransport, null) != null ? {
           secondary_transport = {
             for k, v in {
-              transport_type            = try(each.value.rule.configuration.secondaryTransport.transportType, null)
-              primary_interface_role    = try(each.value.rule.configuration.secondaryTransport.primaryInterfaceRole, null)
-              secondary_interface_role  = try(each.value.rule.configuration.secondaryTransport.secondaryInterfaceRole, null)
+              transport_type           = try(each.value.rule.configuration.secondaryTransport.transportType, null)
+              primary_interface_role   = try(each.value.rule.configuration.secondaryTransport.primaryInterfaceRole, null)
+              secondary_interface_role = try(each.value.rule.configuration.secondaryTransport.secondaryInterfaceRole, null)
             } : k => v if v != null
           }
         } : {}
@@ -234,12 +254,12 @@ resource "cato_wnw_rule" "rules" {
           {
             source = {
               for k, v in {
-                ip                  = try(length(exception.source.ip), 0) > 0 ? exception.source.ip : null
-                host                = try(length(exception.source.host), 0) > 0 ? [for host in exception.source.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
-                site                = try(length(exception.source.site), 0) > 0 ? [for site in exception.source.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
-                users_group         = try(length(exception.source.usersGroup), 0) > 0 ? [for group in exception.source.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
-                network_interface   = try(length(exception.source.networkInterface), 0) > 0 ? [for ni in exception.source.networkInterface : can(ni.name) ? { name = ni.name } : { id = ni.id }] : null
-                ip_range            = try(length(exception.source.ipRange), 0) > 0 ? [for range in exception.source.ipRange : {
+                ip                = try(length(exception.source.ip), 0) > 0 ? exception.source.ip : null
+                host              = try(length(exception.source.host), 0) > 0 ? [for host in exception.source.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
+                site              = try(length(exception.source.site), 0) > 0 ? [for site in exception.source.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
+                users_group       = try(length(exception.source.usersGroup), 0) > 0 ? [for group in exception.source.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
+                network_interface = try(length(exception.source.networkInterface), 0) > 0 ? [for ni in exception.source.networkInterface : can(ni.name) ? { name = ni.name } : { id = ni.id }] : null
+                ip_range = try(length(exception.source.ipRange), 0) > 0 ? [for range in exception.source.ipRange : {
                   from = range.from
                   to   = range.to
                 }] : null
@@ -258,12 +278,12 @@ resource "cato_wnw_rule" "rules" {
           {
             destination = {
               for k, v in {
-                ip                  = try(length(exception.destination.ip), 0) > 0 ? exception.destination.ip : null
-                host                = try(length(exception.destination.host), 0) > 0 ? [for host in exception.destination.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
-                site                = try(length(exception.destination.site), 0) > 0 ? [for site in exception.destination.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
-                users_group         = try(length(exception.destination.usersGroup), 0) > 0 ? [for group in exception.destination.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
-                network_interface   = try(length(exception.destination.networkInterface), 0) > 0 ? [for ni in exception.destination.networkInterface : can(ni.name) ? { name = ni.name } : { id = ni.id }] : null
-                ip_range            = try(length(exception.destination.ipRange), 0) > 0 ? [for range in exception.destination.ipRange : {
+                ip                = try(length(exception.destination.ip), 0) > 0 ? exception.destination.ip : null
+                host              = try(length(exception.destination.host), 0) > 0 ? [for host in exception.destination.host : can(host.name) ? { name = host.name } : { id = host.id }] : null
+                site              = try(length(exception.destination.site), 0) > 0 ? [for site in exception.destination.site : can(site.name) ? { name = site.name } : { id = site.id }] : null
+                users_group       = try(length(exception.destination.usersGroup), 0) > 0 ? [for group in exception.destination.usersGroup : can(group.name) ? { name = group.name } : { id = group.id }] : null
+                network_interface = try(length(exception.destination.networkInterface), 0) > 0 ? [for ni in exception.destination.networkInterface : can(ni.name) ? { name = ni.name } : { id = ni.id }] : null
+                ip_range = try(length(exception.destination.ipRange), 0) > 0 ? [for range in exception.destination.ipRange : {
                   from = range.from
                   to   = range.to
                 }] : null
