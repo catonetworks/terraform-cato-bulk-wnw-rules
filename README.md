@@ -1,5 +1,12 @@
 # Terraform Cato Bulk WAN Network Rules Module
 
+> [!IMPORTANT]
+> **Early access (beta).** This module targets the Cato Terraform provider
+> `2.0.0-prerelease.1`, an **early-access / beta** release. A general-availability
+> (GA) release is planned shortly, following the current evaluation period.
+> Until GA ships, pin the exact prerelease version.
+
+
 This module allows you to bulk import WAN Network (WNW) rules and sections from a JSON configuration file, and define the order of those rules and sections within the Cato policy.
 
 ## Usage
@@ -177,6 +184,7 @@ The final policy structure will be:
 ### Parameters
 
 - `wnw_rules_json_file_path`: Path to your JSON configuration file
+- `policy_enabled`: (Optional, default `null`) Account-level policy toggle. `null` leaves it unmanaged (resource not created); `true`/`false` manages it via `cato_wan_network_policy`.
 - `section_to_start_after_id`: (Optional) ID of an existing section after which to insert the new sections
 
 ## Working with Existing Rules (Brownfield Deployments)
@@ -560,13 +568,13 @@ These example outputs demonstrate various practical applications:
 | Name | Version |
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.13 |
-| <a name="requirement_cato"></a> [cato](#requirement\_cato) | >= 0.0.51 |
+| <a name="requirement_cato"></a> [cato](#requirement\_cato) | >= 2.0.0-prerelease.1 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_cato"></a> [cato](#provider\_cato) | >= 0.0.51 |
+| <a name="provider_cato"></a> [cato](#provider\_cato) | >= 2.0.0-prerelease.1 |
 
 ## Modules
 
@@ -585,6 +593,7 @@ No modules.
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | <a name="input_allow_empty_policy"></a> [allow\_empty\_policy](#input\_allow\_empty\_policy) | Safety guard: fail planning when the policy JSON contains 0 rules unless explicitly allowed. Protects against a truncated or wrong-tenant export destroying the live policy. Set true only for intentional greenfield/teardown. | `bool` | `false` | no |
+| <a name="input_policy_enabled"></a> [policy\_enabled](#input\_policy\_enabled) | Manage the account-level WAN Network policy toggle. null leaves the toggle unmanaged; true/false manages it via cato\_wan\_network\_policy. | `bool` | `null` | no |
 | <a name="input_section_to_start_after_id"></a> [section\_to\_start\_after\_id](#input\_section\_to\_start\_after\_id) | The ID of the section after which to start adding rules. | `string` | `null` | no |
 | <a name="input_wnw_rules_json_file_path"></a> [wnw\_rules\_json\_file\_path](#input\_wnw\_rules\_json\_file\_path) | Path to the json file containing the WAN Network rule data. | `string` | n/a | yes |
 

@@ -11,6 +11,12 @@ variable "section_to_start_after_id" {
 }
 
 
+variable "policy_enabled" {
+  description = "Manage the account-level WAN Network policy toggle. null leaves the toggle unmanaged; true/false manages it via cato_wan_network_policy."
+  type        = bool
+  default     = null
+}
+
 variable "allow_empty_policy" {
   type        = bool
   default     = false
